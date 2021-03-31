@@ -1,0 +1,134 @@
+version: '3.7' 
+services:
+    # Pimcore App
+    app:
+        build:
+            args:
+                app_name: ${APP_NAME}
+                app_uid: 1000
+                app_user: ${APP_USER}
+                #app_password: ${APP_PASSWORD}
+                #app_env: ${APP_ENV}
+                #db_user: ${MYSQL_USER}
+                #db_password: ${MYSQL_PASSWORD}
+                #db_name: ${MYSQL_DATABASE}
+                #db_host: ${MYSQL_HOST}
+                #db_port: ${MYSQL_PORT}
+            context: ./
+            dockerfile: ./.docker/php/php${PHP_VERSION}.Dockerfile
+        image: php:${PHP_VERSION}
+        container_name: ${APP_NAME}_php${PHP_VERSION}
+        restart: unless-stopped
+        env_file: .env
+        depends_on:
+            - nginx
+            - db
+        environment:
+            SERVICE_TAGS: ${APP_ENV}
+        working_dir: /var/www
+        volumes:
+            - ./webroot:/var/www
+            - ./.docker/php/php.ini:/usr/local/etc/php/conf.d/php.ini
+        #    - ./.docker/php/mods.ini:/etc/php/7.4/mods-available/mods.ini
+            - ./logs/pimcore/dev.log:/var/logs/dev.log
+            - ./logs/pimcore/prod.log:/var/logs/prod.log
+            - ./logs/pimcore/loginerror.log:/var/logs/loginerror.log
+            - ./logs/pimcore/usagelog.log:/var/logs/usagelog.log
+        networks:
+            - pimcore_demo
+
+    # Nginx
+    nginx:
+        image: nginx:${NGINX_VERSION}
+        container_name: ${APP_NAME}_nginx
+        restart: unless-stopped
+        ports:
+            - "${NGINX_PORT}:80"
+        #    - "${NGINX_SSL_PORT}:443"
+        environment:
+            APP_NAME: ${APP_NAME}
+            PHP_HOST: ${PHP_HOST}
+            PHP_PORT: ${PHP_PORT}
+            NGINX_LOG_PATH: ${NGINX_LOG_PATH}
+            SERVICE_TAGS: ${APP_ENV}
+        volumes:
+            - ./webroot:/var/www
+            - ./.docker/nginx/default.conf.template:/etc/nginx/templates/default.conf.template
+            - ./logs/nginx/error.log:${NGINX_LOG_PATH}/error.log
+            - ./logs/nginx/access.log:${NGINX_LOG_PATH}access.log
+        networks:
+            - pimcore_demo
+
+    # MySQL
+    db:
+        image: mysql:${MYSQL_VERSION}
+        container_name: ${APP_NAME}_mysql${MYSQL_VERSION}
+        restart: unless-stopped
+        ports:
+            - "${MYSQL_PORT}:${MYSQL_PORT}"
+        environment:
+            MYSQL_DATABASE: ${MYSQL_DATABASE}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+            MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+            MYSQL_USER: ${MYSQL_USER}
+            SERVICE_TAGS: ${APP_ENV}
+        volumes:
+            - ./database/:/var/lib/mysql/
+            - ./.docker/mysql/init.sql:/data/application/init.sql
+        #    - ./.docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+        command: [
+        #    envsubst < /data/application/init.sql,
+            mysqld, 
+            --init_file=/data/application/init.sql,
+            --max_allowed_packet=100M, 
+            --character-set-server=utf8mb4, 
+            --collation-server=utf8mb4_unicode_ci,
+            --innodb_file_format=Barracuda, 
+            --innodb_large_prefix=1, 
+            --innodb_file_per_table=1
+            ]
+        networks:
+            - pimcore_demo
+
+    # Portainer
+    portainer:
+        image: portainer/portainer-ce
+        container_name: ${APP_NAME}_portainer
+        restart: always
+        ports:
+            - "${PORTAINER_PORT}:${PORTAINER_PORT}"
+        environment:
+            SERVICE_TAGS: ${APP_ENV}
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        networks:
+            - pimcore_demo
+
+    # PHPMyAdmin
+    phpmyadmin:
+        image: phpmyadmin/phpmyadmin:latest
+        container_name: ${APP_NAME}_phpmyadmin
+        restart: always
+        ports:
+            - "${PHPMYADMIN_PORT}:80"
+        depends_on:
+            - db
+        environment:
+        #    PMA_ABSOLUTE_URI: "${APP_HOST}/phpmyadmin"
+            PMA_HOST: ${MYSQL_HOST}
+            PMA_PORT: ${MYSQL_PORT}
+            PMA_USER: ${MYSQL_USER}
+            PMA_PASSWORD: ${MYSQL_PASSWORD}
+            PMA_ARBITRARY: 1
+            PHP_UPLOAD_MAX_FILESIZE: 128MB
+            PHP_POST_MAX_SIZE: 128M
+            PHP_MAX_EXECUTION_TIME: 360
+            PHP_MAX_INPUT_TIME: 360
+            SERVICE_TAGS: ${APP_ENV}
+        networks:
+            - pimcore_demo
+
+# Docker Networks
+networks:
+    pimcore_demo:
+        driver: bridge
